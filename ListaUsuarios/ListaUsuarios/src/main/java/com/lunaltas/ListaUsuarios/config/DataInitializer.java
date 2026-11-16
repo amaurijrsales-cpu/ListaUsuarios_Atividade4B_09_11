@@ -1,36 +1,96 @@
+
 package com.lunaltas.ListaUsuarios.config;
 
-import org.javalite.activejdbc.Base;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
+
+import java.sql.Connection;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.HashSet;
+import java.util.Set;
 
 @Component
 public class DataInitializer implements CommandLineRunner {
 
     @Override
-    public void run(String... args) throws Exception {
-        // 1. Abre a ligação no início da aplicação
-        System.out.println("Ligar à base de dados SQLite...");
-        try {
-            Base.open("org.sqlite.JDBC", "jdbc:sqlite:meu_app.db", "", "");
-            // 2. Garante que a tabela existe (Útil porque o ficheiro .db pode estar vazio)
+    public void run(String... args) {
+        try (Connection connection = DatabaseConnection.getConnection()) {
+
             String sqlCreate = "CREATE TABLE IF NOT EXISTS users (" +
                     "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                    "first_name VARCHAR(56), " +
-                    "last_name VARCHAR(56), " +
-                    "email VARCHAR(100))";
-            Base.exec(sqlCreate);
+                    "name TEXT, " +
+                    "arroba TEXT, " +
+                    "cpf TEXT, " +
+                    "email TEXT, " +
+                    "idade INTEGER)";
 
-            // A PARTIR DAQUI A LIGAÇÃO ESTÁ ABERTA E A TABELA EXISTE
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate(sqlCreate);
+            }
 
+            Set<String> colunas = obterColunas(connection);
 
-        } catch (Exception e) {
-            System.err.println("Ocorreu um erro: " + e.getMessage());
-        } finally {
-            // 4. É fundamental SEMPRE fechar a ligação no final
-            // O bloco finally garante que fechará mesmo se der erro no meio do caminho
-            Base.close();
-            System.out.println("Ligação encerrada.");
+            adicionarColuna(connection, colunas, "name", "TEXT");
+            adicionarColuna(connection, colunas, "arroba", "TEXT");
+            adicionarColuna(connection, colunas, "cpf", "TEXT");
+            adicionarColuna(connection, colunas, "email", "TEXT");
+            adicionarColuna(connection, colunas, "idade", "INTEGER");
+
+            if (colunas.contains("first_name") &&
+                    colunas.contains("last_name")) {
+
+                String sqlMigracao =
+                        "UPDATE users SET name = TRIM(" +
+                                "COALESCE(first_name, '') || ' ' || " +
+                                "COALESCE(last_name, '')) " +
+                                "WHERE name IS NULL OR TRIM(name) = ''";
+
+                try (Statement statement = connection.createStatement()) {
+                    statement.executeUpdate(sqlMigracao);
+                }
+            }
+
+            System.out.println("Banco SQLite inicializado com sucesso.");
+
+        } catch (SQLException e) {
+            throw new IllegalStateException(
+                    "Não foi possível inicializar o banco de dados.", e);
+        }
+    }
+
+    private Set<String> obterColunas(Connection connection)
+            throws SQLException {
+
+        Set<String> colunas = new HashSet<>();
+
+        try (Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("PRAGMA table_info(users)")) {
+
+            while (result.next()) {
+                colunas.add(result.getString("name"));
+            }
+        }
+
+        return colunas;
+    }
+
+    private void adicionarColuna(
+            Connection connection,
+            Set<String> colunas,
+            String nome,
+            String tipo) throws SQLException {
+
+        if (!colunas.contains(nome)) {
+
+            String sql = "ALTER TABLE users ADD COLUMN " + nome + " " + tipo;
+
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate(sql);
+            }
+
+            colunas.add(nome);
         }
     }
 }
